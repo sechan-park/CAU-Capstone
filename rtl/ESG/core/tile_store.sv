@@ -97,16 +97,70 @@ module tile_store #(
   // Track whether the accepted burst is the last one for this row
   logic        burst_last_q;
   // Track first WVALID handshake within S_DMA to open a read window
-//   logic wvalid_q;           // previous WVALID level
-  logic rd_window_q;        // latched window after first WVALID handshake
-  logic w_fire;             // AXI W channel handshake (VALID && READY)
-  assign w_fire = M_AXI_AWVALID & M_AXI_AWREADY;
+  //   logic wvalid_q;           // previous WVALID level
+
+  // try a new thing!! (jimin-251114)
+  // logic rd_window_q;        // latched window after first WVALID handshake
+  // logic w_fire;             // AXI W channel handshake (VALID && READY)
+  // assign w_fire = M_AXI_AWVALID & M_AXI_AWREADY;
+
+  // try a new thing!! (jimin-251114)
+  logic rd_window_q;
+  // logic w_aw_fire;
+  // assign w_aw_fire = M_AXI_AWVALID & M_AXI_AWREADY;
+  // a new thing end
+
+  // try a new thing!! (jimin-251115)
+  // ------------------------------------------------------------------
+  // C-buffer → FIFO → dma_write 경로
+  // ------------------------------------------------------------------
+  // FIFO (32bit, depth=64, FWFT)
+  logic [DATA_W-1:0] fifo_din;
+  logic [DATA_W-1:0] fifo_dout;
+  logic              fifo_wr_en;
+  logic              fifo_rd_en;
+  logic              fifo_full;
+  logic              fifo_empty;
+  logic              fifo_valid;      // FWFT 모드일 때 dout 유효 표시
+
+  // C-buffer read enable 1cycle delay (BRAM 1cycle latency 정렬용)
+  logic              cbuf_rd_en_d1;
+
+  always_ff @(posedge clk or negedge rstn) begin
+    if (!rstn)
+      cbuf_rd_en_d1 <= 1'b0;
+    else
+      cbuf_rd_en_d1 <= cbuf_rd_en;
+  end
+
+  // C-buffer data → FIFO write
+  assign fifo_din   = cbuf_rd_data;
+  assign fifo_wr_en = cbuf_rd_en_d1 & ~fifo_full;
+
+  // dma_write가 요청할 때마다 FIFO read
+  assign fifo_rd_en = indata_req_o & ~fifo_empty;
+  // a new thing end
+
 
   // Address generator (WRITE): per-row bursts
   logic                 ag_start, ag_done;
   logic                 ag_req_valid, ag_req_ready, ag_req_last;
   logic [AXI_ADDR_WIDTH-1:0] ag_req_addr;
   logic [7:0]            ag_req_len; // beats-1
+
+  // try a new thing!! (jimin-251115)
+  c_buf_fifo u_c_buf_fifo (
+    .clk    (clk),
+    .srst   (~rstn),
+    .din    (fifo_din),
+    .wr_en  (fifo_wr_en),
+    .rd_en  (fifo_rd_en),
+    .dout   (fifo_dout),
+    .full   (fifo_full),
+    .empty  (fifo_empty),
+    .valid  (fifo_valid)
+  );
+  // a new thing end
 
   axi_addr_gen #(
     .ADDR_W          (AXI_ADDR_WIDTH),
@@ -142,7 +196,10 @@ module tile_store #(
     // functional
     .start_dma(start_dma), .done_o(done_dma),
     .num_trans(dma_words_q), .start_addr(dma_start_addr_q),
-    .indata(cbuf_rd_data), .indata_req_o(indata_req_o),
+    // .indata(cbuf_rd_data), .indata_req_o(indata_req_o),
+    // try a new thing!! (jimin-251115)
+    .indata(fifo_dout), .indata_req_o(indata_req_o),
+    // a new thing end
     .fail_check(),
     .clk(clk), .rstn(rstn)
   );
@@ -216,7 +273,11 @@ module tile_store #(
             dma_start_addr_q <= ag_req_addr;
             burst_last_q     <= ag_req_last;
             cbuf_rd_addr      <= (row_idx*TILE_SIZE);
-            start_dma        <= 1'b1;
+
+            // try a new thing!! (jimin-251114)
+            col_idx          <= 4'd0;
+
+            // start_dma        <= 1'b1;
             rd_window_q      <= 1'b0;   // clear window for new burst
             state            <= S_DMA;
           end else begin
@@ -224,27 +285,89 @@ module tile_store #(
           end
         end
 
+        // S_DMA: begin
+        //   wr_busy      <= 1'b1;
+        //   start_dma    <= 1'b0;
+        //   // Latch window open on the first W handshake; keep it until end of burst
+        //   // try a new thing!! (jimin-251114)
+        //   // if (!rd_window_q && w_fire) begin
+        //   //   rd_window_q <= 1'b1;
+        //   // end
+
+        //   // try a new thing!! (jimin-251114)
+        //   if (!rd_window_q && w_aw_fire) begin
+        //     rd_window_q <= 1'b1;
+        //     if (m_eff != 0) begin
+        //       cbuf_rd_en <= 1'b1;
+        //       col_idx    <= 4'd1;
+        //       // cbuf_rd_addr <= cbuf_rd_addr + 1'b1;
+        //     end else begin
+        //       col_idx    <= 4'd0;
+        //     end
+        //   end
+
+        //   if (rd_window_q && indata_req_o && (col_idx < m_eff)) begin
+        //     cbuf_rd_en  <= 1'b1;
+        //     cbuf_rd_addr <= cbuf_rd_addr + 1'b1;
+        //     col_idx     <= col_idx + 1'b1;
+        //   end
+          
+        //   // Drive BRAM read only after the first WVALID handshake
+        //   // try a new thing!! (jimin-251114)
+        //   // if ( (rd_window_q || w_fire) && (col_idx < m_eff) ) begin
+        //   //   cbuf_rd_en  <= 1'b1;
+        //   //   col_idx     <= col_idx + 1'b1;
+        //   //   cbuf_rd_addr<= cbuf_rd_addr + 1'b1;
+        //   // end
+
+        //   if (done_dma) begin
+        //     state <= (burst_last_q) ? S_NEXT_ROW : S_REQ;
+        //     cbuf_rd_en <= 1'b0;
+        //     rd_window_q <= 1'b0; // close window at burst end
+        //   end else begin
+        //     state <= S_DMA;
+        //   end
+        // end
+
+        // try a new thing!! (jimin-251115)
         S_DMA: begin
-          wr_busy      <= 1'b1;
-          start_dma    <= 1'b0;
-          // Latch window open on the first W handshake; keep it until end of burst
-          if (!rd_window_q && w_fire) begin
-            rd_window_q <= 1'b1;
+          wr_busy   <= 1'b1;
+          start_dma <= 1'b0;
+
+          // 1) 아직 이 row의 C 데이터를 다 못 읽었으면
+          //    C 버퍼에서 한 word씩 읽어서 FIFO에 채운다.
+          //    cbuf_rd_en 은 항상 여기서만 발생.
+          if (col_idx < m_eff) begin
+            if (!fifo_full) begin
+              cbuf_rd_en <= 1'b1;
+              // 첫 번째 read는 S_REQ에서 설정한 주소를 그대로 쓰고,
+              // 이후부터는 +1씩 증가
+              if (col_idx != 0) begin
+                cbuf_rd_addr <= cbuf_rd_addr + 1'b1;
+              end
+              col_idx <= col_idx + 1'b1;
+            end
           end
-          // Drive BRAM read only after the first WVALID handshake
-          if ( (rd_window_q || w_fire) && (col_idx < m_eff) ) begin
-            cbuf_rd_en  <= 1'b1;
-            col_idx     <= col_idx + 1'b1;
-            cbuf_rd_addr<= cbuf_rd_addr + 1'b1;
+          // 2) C에서 m_eff개를 다 읽어서 FIFO에 넣었으면
+          //    이제 dma_write 를 시작한다.
+          else begin
+            // 아직 DMA를 안 시작했으면 한 번만 start_dma 펄스 발생
+            if (!rd_window_q) begin
+              start_dma   <= 1'b1;
+              rd_window_q <= 1'b1;   // "DMA 시작했음" 플래그로 재사용
+            end
           end
+
+          // 3) dma_write 가 전체 burst를 끝내면 다음 row로 이동
           if (done_dma) begin
-            state <= (burst_last_q) ? S_NEXT_ROW : S_REQ;
-            cbuf_rd_en <= 1'b0;
-            rd_window_q <= 1'b0; // close window at burst end
+            rd_window_q  <= 1'b0;
+            cbuf_rd_en   <= 1'b0;
+            state        <= (burst_last_q) ? S_NEXT_ROW : S_REQ;
           end else begin
-            state <= S_DMA;
+            state        <= S_DMA;
           end
         end
+        // a new thing end
 
         S_NEXT_ROW: begin
           wr_busy      <= 1'b1;

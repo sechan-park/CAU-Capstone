@@ -323,9 +323,9 @@ module sa_engine_ip_v1_0_S00_AXI #
             end
 
             // Overlay read-only status bits while leaving START (bit[0]) software controlled
-            slv_reg0[1] <= i_done;
-            slv_reg0[2] <= i_busy;
-            slv_reg0[3] <= i_error;
+            slv_reg0[2] <= i_done;
+            slv_reg0[3] <= i_busy;
+            slv_reg0[4] <= i_error;
         end
     end
 
@@ -407,14 +407,14 @@ module sa_engine_ip_v1_0_S00_AXI #
     assign slv_reg_rden = axi_arready & S_AXI_ARVALID & ~axi_rvalid;
 
     // Overlay status bits onto CONTROL register for reads
-    wire [C_S_AXI_DATA_WIDTH-1:0] reg0_with_status;
-    assign reg0_with_status = (slv_reg0 & 32'hFFF8_FFFF) // clear [18:16]
-                            | {13'b0, i_error, i_busy, i_done, 16'b0};
+    // wire [C_S_AXI_DATA_WIDTH-1:0] reg0_with_status;
+    // assign reg0_with_status = (slv_reg0 & 32'hFFF8_FFFF) // clear [18:16]
+    //                         | {13'b0, i_error, i_busy, i_done, 16'b0};
 
     always @(*) begin
         // Address decoding for reading registers
         case (axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB])
-            4'h0 : reg_data_out <= reg0_with_status;
+            4'h0 : reg_data_out <= slv_reg0;
             4'h1 : reg_data_out <= slv_reg1;
             4'h2 : reg_data_out <= slv_reg2;
             4'h3 : reg_data_out <= slv_reg3;

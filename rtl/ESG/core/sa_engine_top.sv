@@ -243,10 +243,31 @@ module sa_engine_top #(
 
   // ========================================================================
   // Status Outputs
+  //   - ctrl_done: pulse from tile_controller(1 cycle done signal)
+  //   - done_latched: sticky level for AXI-Lite read
   // ========================================================================
+  logic done_latched;
+
+  always_ff @(posedge M_AXI_ACLK or negedge M_AXI_ARESETN) begin
+    if (!M_AXI_ARESETN) begin
+      done_latched <= 1'b0;
+    end else begin
+      // new start clears DONE
+      if (i_start) begin
+        done_latched <= 1'b0;
+      end
+      // controller done pulse sets DONE
+      else if (ctrl_done) begin
+        done_latched <= 1'b1;
+      end
+      // otherwise, keep value
+    end
+  end
+
   assign o_busy  = ctrl_busy;
-  assign o_done  = ctrl_done;
-  assign o_error = 1'b0;  // No error handling yet
+  assign o_done  = done_latched;  // <-- now a sticky level, not a pulse
+  assign o_error = 1'b0;          // No error handling yet
+
 
   // ========================================================================
   // AXI Mux (Read: Loader only, Write: Store only)

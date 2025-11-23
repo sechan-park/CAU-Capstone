@@ -187,13 +187,14 @@ module bram_pingpong #(
   //   bank*_rdata valid at cycle N+1 (from BRAM)
   //   rd_rdata is just combinational mux of bank*_rdata
   // ---------------------------------------------------------------------------
-  always_comb begin
-    if (!consuming) begin
-      rd_rdata = '0;
-    end else begin
-      rd_rdata = (bank_sel == 1'b0) ? bank0_rdata : bank1_rdata;
-    end
-  end
+  // always_comb begin
+  //   if (!consuming) begin
+  //     rd_rdata = '0;
+  //   end else begin
+  //     rd_rdata = (bank_sel == 1'b0) ? bank0_rdata : bank1_rdata;
+  //   end
+  // end
+  assign rd_rdata = (bank_sel == 1'b0) ? bank0_rdata : bank1_rdata;
 
   // ---------------------------------------------------------------------------
   // Main FSM (fill / consume / bank state)
